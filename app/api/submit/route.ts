@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import multer from 'multer';
 import { Readable } from 'stream';
 import { promisify } from 'util';
 
+// Initialize Google Cloud Storage
 const storage = new Storage({ projectId: process.env.GCLOUD_PROJECT });
 const bucket = storage.bucket(process.env.GCLOUD_BUCKET_NAME!);
 
@@ -11,15 +12,14 @@ const upload = multer({
   storage: multer.memoryStorage(),
 });
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
+export const runtime = 'edge';
+export const bodyParser = {
+  sizeLimit: '1mb',
 };
 
 const pipeline = promisify(Readable.pipeline);
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   return new Promise((resolve, reject) => {
     upload.single('file')(req as any, {} as any, async (err: any) => {
       if (err) {
