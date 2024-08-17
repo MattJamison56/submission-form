@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
-import multer from 'multer';
 import { Readable } from 'stream';
 import { promisify } from 'util';
 
@@ -8,42 +7,51 @@ import { promisify } from 'util';
 const storage = new Storage({ projectId: process.env.GCLOUD_PROJECT });
 const bucket = storage.bucket(process.env.GCLOUD_BUCKET_NAME!);
 
-const upload = multer({
-  storage: multer.memoryStorage(),
-});
-
-export const runtime = 'edge';
-export const bodyParser = {
-  sizeLimit: '1mb',
-};
+export const runtime = 'nodejs';
 
 const pipeline = promisify(Readable.pipeline);
 
 export async function POST(req: Request) {
-  return new Promise((resolve, reject) => {
-    upload.single('file')(req as any, {} as any, async (err: any) => {
-      if (err) {
-        return resolve(NextResponse.json({ error: 'File upload failed.' }, { status: 500 }));
-      }
+  try {
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
 
-      const { name, email } = req.body as unknown as { name: string; email: string };
-      const file = (req as any).file;
+    if (!file) {
+      return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 });
+    }
 
-      if (file) {
-        const blob = bucket.file(file.originalname);
-        const blobStream = blob.createWriteStream({
-          resumable: false,
-        });
-
-        try {
-          await pipeline(Readable.from(file.buffer), blobStream);
-          return resolve(NextResponse.json({ message: 'Submission successful!' }));
-        } catch (error) {
-          return resolve(NextResponse.json({ error: 'File upload to Google Cloud failed.' }, { status: 500 }));
+    // Manual conversion of ReadableStream to Node.js Readable stream
+    const reader = file.stream().getReader();
+    const nodeStream = new Readable({
+      async read() {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            this.push(null);
+            break;
+          }
+          this.push(Buffer.from(value));
         }
-      }
-
-      return resolve(NextResponse.json({ error: 'No file uploaded.' }, { status: 400 }));
+      },
     });
-  });
+
+    const blob = bucket.file(file.name);
+    const blobStream = blob.createWriteStream({
+      resumable: false,
+    });
+
+    nodeStream.pipe(blobStream);
+
+    return new Promise((resolve, reject) => {
+      blobStream.on('finish', () => {
+        resolve(NextResponse.json({ message: 'Submission successful!' }));
+      });
+
+      blobStream.on('error', (err) => {
+        reject(NextResponse.json({ error: 'File upload to Google Cloud failed.' }, { status: 500 }));
+      });
+    });
+  } catch (error) {
+    return NextResponse.json({ error: 'An unexpected error occurred.' }, { status: 500 });
+  }
 }
