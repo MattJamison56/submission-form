@@ -6,9 +6,10 @@ const storage = new Storage({
   projectId: process.env.GCLOUD_PROJECT,
   credentials: {
     client_email: process.env.GCLOUD_CLIENT_EMAIL,
-    private_key: process.env.GCLOUD_PRIVATE_KEY!.replace(/\\n/g, '\n'), // Replace escaped newlines with actual newlines
+    private_key: process.env.GCLOUD_PRIVATE_KEY!.replace(/\\n/g, '\n'),
   },
 });
+
 const bucket = storage.bucket(process.env.GCLOUD_BUCKET_NAME!);
 
 export const runtime = 'nodejs';
@@ -26,17 +27,21 @@ export async function POST(req: Request): Promise<Response> {
 
     console.log('Received file:', file.name);
 
-    // Convert the file stream from the browser to a Node.js readable stream
     const reader = file.stream().getReader();
     const nodeStream = new Readable({
       async read() {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) {
-            this.push(null);
-            break;
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) {
+              this.push(null);
+              break;
+            }
+            this.push(Buffer.from(value));
           }
-          this.push(Buffer.from(value));
+        } catch (err: any) {
+          console.error('Error while reading file stream:', err);
+          this.destroy(err);
         }
       },
     });
@@ -58,6 +63,12 @@ export async function POST(req: Request): Promise<Response> {
       blobStream.on('error', (err) => {
         console.error('Error uploading file to Google Cloud Storage:', err);
         reject(NextResponse.json({ error: 'File upload to Google Cloud failed.' }, { status: 500 }));
+      });
+
+      nodeStream.on('error', (err) => {
+        console.error('Error in file stream:', err);
+        blobStream.destroy(err);
+        reject(NextResponse.json({ error: 'Stream error during file upload.' }, { status: 500 }));
       });
     });
   } catch (error) {
