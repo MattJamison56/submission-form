@@ -1,17 +1,13 @@
 import { NextResponse } from 'next/server';
 import { Storage } from '@google-cloud/storage';
 import { Readable } from 'stream';
-import { promisify } from 'util';
 
-// Initialize Google Cloud Storage
 const storage = new Storage({ projectId: process.env.GCLOUD_PROJECT });
 const bucket = storage.bucket(process.env.GCLOUD_BUCKET_NAME!);
 
 export const runtime = 'nodejs';
 
-const pipeline = promisify(Readable.pipeline);
-
-export async function POST(req: Request) {
+export async function POST(req: Request): Promise<Response> {
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
@@ -20,7 +16,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'No file uploaded.' }, { status: 400 });
     }
 
-    // Manual conversion of ReadableStream to Node.js Readable stream
+    // Convert the file stream to a Node.js readable stream
     const reader = file.stream().getReader();
     const nodeStream = new Readable({
       async read() {
@@ -40,9 +36,9 @@ export async function POST(req: Request) {
       resumable: false,
     });
 
-    nodeStream.pipe(blobStream);
+    return new Promise<Response>((resolve, reject) => {
+      nodeStream.pipe(blobStream);
 
-    return new Promise((resolve, reject) => {
       blobStream.on('finish', () => {
         resolve(NextResponse.json({ message: 'Submission successful!' }));
       });
